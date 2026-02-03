@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 import os
 from pathlib import Path
+import json
 
 app = FastAPI(title="Mergington High School API",
               description="API for viewing and signing up for extracurricular activities")
@@ -77,10 +78,28 @@ activities = {
     }
 }
 
+# Load teacher credentials from JSON file
+def load_teachers():
+    teachers_file = Path(__file__).parent / "teachers.json"
+    with open(teachers_file, 'r') as f:
+        data = json.load(f)
+    return {teacher['username']: teacher['password'] for teacher in data['teachers']}
+
+teachers = load_teachers()
+
 
 @app.get("/")
 def root():
     return RedirectResponse(url="/static/index.html")
+
+
+@app.post("/login")
+def login(username: str, password: str):
+    """Authenticate a teacher"""
+    if username in teachers and teachers[username] == password:
+        return {"success": True, "message": "Login successful"}
+    else:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
 
 
 @app.get("/activities")
@@ -89,14 +108,25 @@ def get_activities():
 
 
 @app.post("/activities/{activity_name}/signup")
-def signup_for_activity(activity_name: str, email: str):
-    """Sign up a student for an activity"""
+def signup_for_activity(activity_name: str, email: str, teacher_username: str = None):
+    """Sign up a student for an activity (only teachers can do this)"""
+    # Check if teacher is authenticated
+    if teacher_username is None or teacher_username not in teachers:
+        raise HTTPException(status_code=401, detail="Only teachers can register students")
+    
     # Validate activity exists
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
 
     # Get the specific activity
     activity = activities[activity_name]
+
+    # Check if activity is full
+    if len(activity["participants"]) >= activity["max_participants"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Activity is full"
+        )
 
     # Validate student is not already signed up
     if email in activity["participants"]:
@@ -111,8 +141,12 @@ def signup_for_activity(activity_name: str, email: str):
 
 
 @app.delete("/activities/{activity_name}/unregister")
-def unregister_from_activity(activity_name: str, email: str):
-    """Unregister a student from an activity"""
+def unregister_from_activity(activity_name: str, email: str, teacher_username: str = None):
+    """Unregister a student from an activity (only teachers can do this)"""
+    # Check if teacher is authenticated
+    if teacher_username is None or teacher_username not in teachers:
+        raise HTTPException(status_code=401, detail="Only teachers can unregister students")
+    
     # Validate activity exists
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
